@@ -44,7 +44,12 @@ jobs:
       - name: Check Android 16 SDK
         run: |
           test -d "$ANDROID_HOME/platforms/android-36"
-          test -d "$ANDROID_HOME/build-tools/36.0.0"
+
+          if [ ! -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
+            echo "Build tools 36.0.0 not found"
+            ls -la "$ANDROID_HOME/build-tools/"
+            exit 1
+          fi
 
           echo "Android 16 SDK found"
           echo "Build tools 36.0.0 found"
@@ -67,7 +72,7 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Found project at:"
+          echo "Found Android project:"
           echo "$PROJECT_DIR"
 
       - name: Fix Java and Kotlin JVM targets
@@ -75,7 +80,6 @@ jobs:
         run: |
           cat >> app/build.gradle.kts <<'EOF'
 
-          // Force Java and Kotlin to use JVM 17
           android {
               compileOptions {
                   sourceCompatibility = JavaVersion.VERSION_17
@@ -89,7 +93,24 @@ jobs:
 
           EOF
 
-          echo "Java/Kotlin JVM target set to 17"
+          echo "Java and Kotlin JVM targets set to 17"
+
+      - name: Fix Shizuku UserService overrides
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          SERVICE="app/src/main/java/com/simon/navigation_switcher/NavigationUserService.java"
+
+          if [ ! -f "$SERVICE" ]; then
+            echo "NavigationUserService.java not found"
+            exit 1
+          fi
+
+          echo "Removing incompatible @Override annotations..."
+
+          sed -i 's/@Override[[:space:]]*//g' "$SERVICE"
+
+          echo "Updated NavigationUserService.java:"
+          cat "$SERVICE"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
