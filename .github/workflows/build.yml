@@ -27,33 +27,14 @@ jobs:
 
           echo "Android SDK: $SDK"
 
-          if [ ! -d "$SDK" ]; then
-            echo "Android SDK directory not found"
-            exit 1
-          fi
+          test -d "$SDK"
 
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
-
-          SDKMANAGER=$(find "$SDK/cmdline-tools" \
-            -type f \
-            -name sdkmanager \
-            -print \
-            -quit 2>/dev/null || true)
-
-          if [ -n "$SDKMANAGER" ]; then
-            echo "Found sdkmanager at: $SDKMANAGER"
-            echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-          fi
 
       - name: Check Android 16 SDK
         run: |
           test -d "$ANDROID_HOME/platforms/android-36"
-
-          if [ ! -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
-            echo "Build tools 36.0.0 not found"
-            ls -la "$ANDROID_HOME/build-tools/"
-            exit 1
-          fi
+          test -d "$ANDROID_HOME/build-tools/36.0.0"
 
           echo "Android 16 SDK found"
           echo "Build tools 36.0.0 found"
@@ -62,6 +43,8 @@ jobs:
         run: |
           mkdir extracted
           unzip -q ./*.zip -d extracted
+
+          echo "ZIP extracted successfully"
 
       - name: Find Android project
         run: |
@@ -72,7 +55,7 @@ jobs:
             -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
-            echo "Could not find settings.gradle.kts"
+            echo "ERROR: settings.gradle.kts not found"
             exit 1
           fi
 
@@ -80,7 +63,7 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Android project found at:"
+          echo "Android project:"
           echo "$PROJECT_DIR"
 
       - name: Fix Java and Kotlin JVM targets
@@ -101,17 +84,19 @@ jobs:
 
           EOF
 
-          echo "Java and Kotlin JVM targets set to 17"
+          echo "JVM targets fixed to Java 17"
 
-      - name: Fix AIDL package references
+      - name: Fix Navigation AIDL references
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
 
-          echo "Searching for Navigation AIDL..."
+          echo "========================================"
+          echo "Finding INavigationService.aidl"
+          echo "========================================"
 
           AIDL=$(find app/src/main/aidl \
-            -name "INavigationService.aidl" \
             -type f \
+            -name "INavigationService.aidl" \
             -print \
             -quit)
 
@@ -121,13 +106,10 @@ jobs:
             exit 1
           fi
 
-          echo "AIDL found:"
+          echo "AIDL:"
           echo "$AIDL"
 
-          AIDL_PACKAGE=$(grep '^package ' "$AIDL" \
-            | head -1 \
-            | sed 's/^package //;s/;//' \
-            | tr -d '\r')
+          AIDL_PACKAGE=$(sed -n 's/^[[:space:]]*package[[:space:]]\+\(.*\);[[:space:]]*$/\1/p' "$AIDL" | head -1 | tr -d '\r')
 
           if [ -z "$AIDL_PACKAGE" ]; then
             echo "ERROR: Could not determine AIDL package"
@@ -135,66 +117,77 @@ jobs:
             exit 1
           fi
 
-          echo "AIDL package is:"
+          echo "AIDL package:"
           echo "$AIDL_PACKAGE"
 
-          FULL_IMPORT="import ${AIDL_PACKAGE}.INavigationService;"
+          FULL_NAME="${AIDL_PACKAGE}.INavigationService"
 
-          echo "Correct import will be:"
-          echo "$FULL_IMPORT"
-
-          echo ""
-          echo "Fixing NavigationUserService.java..."
+          echo "Full service name:"
+          echo "$FULL_NAME"
 
           SERVICE="app/src/main/java/com/simon/navigation_switcher/NavigationUserService.java"
-
-          if [ -f "$SERVICE" ]; then
-
-            # Remove every existing malformed INavigationService import.
-            sed -i '/^[[:space:]]*import[[:space:]]\+INavigationService/d' "$SERVICE"
-
-            # Remove any existing correctly-qualified import to avoid duplicates.
-            sed -i "\|^[[:space:]]*import[[:space:]]\+${AIDL_PACKAGE//./\\.}\.INavigationService;|d" "$SERVICE"
-
-            # Add the correct import after the package declaration.
-            sed -i "/^package /a $FULL_IMPORT" "$SERVICE"
-
-            # Remove invalid override annotations.
-            sed -i 's/@Override[[:space:]]*//g' "$SERVICE"
-
-          fi
-
-          echo ""
-          echo "Fixing NavigationController.java..."
-
           CONTROLLER="app/src/main/java/com/simon/navigation_switcher/NavigationController.java"
 
-          if [ -f "$CONTROLLER" ]; then
+          echo ""
+          echo "========================================"
+          echo "Repairing NavigationUserService.java"
+          echo "========================================"
 
-            # Remove malformed imports.
-            sed -i '/^[[:space:]]*import[[:space:]]\+INavigationService/d' "$CONTROLLER"
-
-            # Remove duplicate correctly-qualified import.
-            sed -i "\|^[[:space:]]*import[[:space:]]\+${AIDL_PACKAGE//./\\.}\.INavigationService;|d" "$CONTROLLER"
-
-            # Add correct import.
-            sed -i "/^package /a $FULL_IMPORT" "$CONTROLLER"
-
+          if [ ! -f "$SERVICE" ]; then
+            echo "ERROR: NavigationUserService.java not found"
+            exit 1
           fi
+
+          # Remove EVERY import containing INavigationService.
+          sed -i '/^[[:space:]]*import[[:space:]].*INavigationService.*;/d' "$SERVICE"
+
+          # Add the correct import immediately after the package line.
+          sed -i "/^[[:space:]]*package[[:space:]]/a import ${FULL_NAME};" "$SERVICE"
+
+          # Remove invalid Override annotations.
+          sed -i '/^[[:space:]]*@Override[[:space:]]*$/d' "$SERVICE"
 
           echo ""
-          echo "===== NavigationUserService.java ====="
+          echo "========================================"
+          echo "Repairing NavigationController.java"
+          echo "========================================"
 
-          if [ -f "$SERVICE" ]; then
-            cat "$SERVICE"
+          if [ ! -f "$CONTROLLER" ]; then
+            echo "ERROR: NavigationController.java not found"
+            exit 1
           fi
+
+          # Remove EVERY import containing INavigationService.
+          sed -i '/^[[:space:]]*import[[:space:]].*INavigationService.*;/d' "$CONTROLLER"
+
+          # Add the correct import.
+          sed -i "/^[[:space:]]*package[[:space:]]/a import ${FULL_NAME};" "$CONTROLLER"
 
           echo ""
-          echo "===== NavigationController.java ====="
+          echo "========================================"
+          echo "FINAL NavigationUserService.java"
+          echo "========================================"
 
-          if [ -f "$CONTROLLER" ]; then
-            cat "$CONTROLLER"
+          cat "$SERVICE"
+
+          echo ""
+          echo "========================================"
+          echo "FINAL NavigationController.java"
+          echo "========================================"
+
+          cat "$CONTROLLER"
+
+          echo ""
+          echo "========================================"
+          echo "Checking for bad imports"
+          echo "========================================"
+
+          if grep -RniE 'import[[:space:]]+INavigationService' app/src/main/java; then
+            echo "ERROR: Bad INavigationService import still exists"
+            exit 1
           fi
+
+          echo "No malformed INavigationService imports found"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
