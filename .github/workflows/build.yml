@@ -11,6 +11,7 @@ jobs:
     runs-on: ubuntu-24.04
 
     steps:
+
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -33,29 +34,17 @@ jobs:
 
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
 
-          echo "Searching for sdkmanager..."
-
           SDKMANAGER=$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit 2>/dev/null || true)
 
           if [ -n "$SDKMANAGER" ]; then
             echo "Found sdkmanager at: $SDKMANAGER"
             echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
-          else
-            echo "sdkmanager not required - using preinstalled Android SDK"
           fi
 
       - name: Check Android 16 SDK
         run: |
-          echo "Checking Android SDK..."
-
           test -d "$ANDROID_HOME/platforms/android-36"
-
-          if [ ! -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
-            echo "Build tools 36.0.0 not found"
-            echo "Available build tools:"
-            ls -la "$ANDROID_HOME/build-tools/" || true
-            exit 1
-          fi
+          test -d "$ANDROID_HOME/build-tools/36.0.0"
 
           echo "Android 16 SDK found"
           echo "Build tools 36.0.0 found"
@@ -64,9 +53,6 @@ jobs:
         run: |
           mkdir extracted
           unzip -q ./*.zip -d extracted
-
-          echo "Project extracted:"
-          find extracted -maxdepth 3 -type f | head -50
 
       - name: Find Android project
         run: |
@@ -81,8 +67,29 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Found Android project at:"
+          echo "Found project at:"
           echo "$PROJECT_DIR"
+
+      - name: Fix Java and Kotlin JVM targets
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          cat >> app/build.gradle.kts <<'EOF'
+
+          // Force Java and Kotlin to use JVM 17
+          android {
+              compileOptions {
+                  sourceCompatibility = JavaVersion.VERSION_17
+                  targetCompatibility = JavaVersion.VERSION_17
+              }
+
+              kotlinOptions {
+                  jvmTarget = "17"
+              }
+          }
+
+          EOF
+
+          echo "Java/Kotlin JVM target set to 17"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
