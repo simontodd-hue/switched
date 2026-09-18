@@ -20,10 +20,16 @@ jobs:
           distribution: temurin
           java-version: '17'
 
-      - name: Install Android SDK
-        uses: android-actions/setup-android@v3
+      - name: Check Android SDK
+        run: |
+          echo "Android SDK: $ANDROID_HOME"
+          sdkmanager --version
+          sdkmanager --list_installed | grep -E "platforms;android-36|build-tools;36"
 
-      - name: Install Android 16 SDK
+      - name: Accept Android SDK licences
+        run: yes | sdkmanager --licenses || true
+
+      - name: Install Android 16 SDK components
         run: |
           sdkmanager "platforms;android-36" "build-tools;36.0.0"
 
@@ -32,7 +38,7 @@ jobs:
           mkdir extracted
           unzip -q ./*.zip -d extracted
 
-      - name: Find project directory
+      - name: Find Android project
         run: |
           PROJECT_DIR=$(find extracted -name settings.gradle.kts -type f -print -quit | xargs dirname)
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
