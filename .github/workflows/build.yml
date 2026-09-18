@@ -1,4 +1,4 @@
-name: Build Navigation Switcher APK
+name: Build Navigation Switcher
 
 on:
   push:
@@ -8,41 +8,81 @@ on:
 
 jobs:
   build:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
 
-      - name: Set up Java 17
+      - name: Set up Java
         uses: actions/setup-java@v4
         with:
           distribution: temurin
           java-version: '17'
 
-      - name: Check Android SDK
+      - name: Configure Android SDK
         run: |
-          echo "Android SDK: $ANDROID_HOME"
-          sdkmanager --version
-          sdkmanager --list_installed | grep -E "platforms;android-36|build-tools;36"
+          SDK="$ANDROID_HOME"
 
-      - name: Accept Android SDK licences
-        run: yes | sdkmanager --licenses || true
+          echo "Android SDK: $SDK"
 
-      - name: Install Android 16 SDK components
+          if [ ! -d "$SDK" ]; then
+            echo "Android SDK directory not found"
+            exit 1
+          fi
+
+          echo "$SDK/platform-tools" >> "$GITHUB_PATH"
+
+          echo "Searching for sdkmanager..."
+
+          SDKMANAGER=$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit 2>/dev/null || true)
+
+          if [ -n "$SDKMANAGER" ]; then
+            echo "Found sdkmanager at: $SDKMANAGER"
+            echo "$(dirname "$SDKMANAGER")" >> "$GITHUB_PATH"
+          else
+            echo "sdkmanager not required - using preinstalled Android SDK"
+          fi
+
+      - name: Check Android 16 SDK
         run: |
-          sdkmanager "platforms;android-36" "build-tools;36.0.0"
+          echo "Checking Android SDK..."
+
+          test -d "$ANDROID_HOME/platforms/android-36"
+
+          if [ ! -d "$ANDROID_HOME/build-tools/36.0.0" ]; then
+            echo "Build tools 36.0.0 not found"
+            echo "Available build tools:"
+            ls -la "$ANDROID_HOME/build-tools/" || true
+            exit 1
+          fi
+
+          echo "Android 16 SDK found"
+          echo "Build tools 36.0.0 found"
 
       - name: Extract project
         run: |
           mkdir extracted
           unzip -q ./*.zip -d extracted
 
+          echo "Project extracted:"
+          find extracted -maxdepth 3 -type f | head -50
+
       - name: Find Android project
         run: |
-          PROJECT_DIR=$(find extracted -name settings.gradle.kts -type f -print -quit | xargs dirname)
+          PROJECT_FILE=$(find extracted -name settings.gradle.kts -type f -print -quit)
+
+          if [ -z "$PROJECT_FILE" ]; then
+            echo "Could not find settings.gradle.kts"
+            exit 1
+          fi
+
+          PROJECT_DIR=$(dirname "$PROJECT_FILE")
+
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
-          echo "Found project at: $PROJECT_DIR"
+
+          echo "Found Android project at:"
+          echo "$PROJECT_DIR"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
