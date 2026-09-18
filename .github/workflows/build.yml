@@ -34,7 +34,11 @@ jobs:
 
           echo "$SDK/platform-tools" >> "$GITHUB_PATH"
 
-          SDKMANAGER=$(find "$SDK/cmdline-tools" -type f -name sdkmanager -print -quit 2>/dev/null || true)
+          SDKMANAGER=$(find "$SDK/cmdline-tools" \
+            -type f \
+            -name sdkmanager \
+            -print \
+            -quit 2>/dev/null || true)
 
           if [ -n "$SDKMANAGER" ]; then
             echo "Found sdkmanager at: $SDKMANAGER"
@@ -61,7 +65,11 @@ jobs:
 
       - name: Find Android project
         run: |
-          PROJECT_FILE=$(find extracted -name settings.gradle.kts -type f -print -quit)
+          PROJECT_FILE=$(find extracted \
+            -name settings.gradle.kts \
+            -type f \
+            -print \
+            -quit)
 
           if [ -z "$PROJECT_FILE" ]; then
             echo "Could not find settings.gradle.kts"
@@ -72,7 +80,7 @@ jobs:
 
           echo "PROJECT_DIR=$PROJECT_DIR" >> "$GITHUB_ENV"
 
-          echo "Found Android project:"
+          echo "Android project found at:"
           echo "$PROJECT_DIR"
 
       - name: Fix Java and Kotlin JVM targets
@@ -95,64 +103,98 @@ jobs:
 
           echo "Java and Kotlin JVM targets set to 17"
 
-      - name: Fix Shizuku service source
+      - name: Fix AIDL package references
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
-          SERVICE_DIR="app/src/main/java/com/simon/navigation_switcher"
 
-          echo "Checking Java source files..."
+          echo "Searching for Navigation AIDL..."
 
-          if [ -d "$SERVICE_DIR" ]; then
-            echo "Found source directory:"
-            echo "$SERVICE_DIR"
-          else
-            echo "Source directory not found:"
-            echo "$SERVICE_DIR"
-            exit 1
-          fi
-
-          AIDL=$(find app/src/main/aidl -name "INavigationService.aidl" -type f -print -quit)
+          AIDL=$(find app/src/main/aidl \
+            -name "INavigationService.aidl" \
+            -type f \
+            -print \
+            -quit)
 
           if [ -z "$AIDL" ]; then
-            echo "Could not find INavigationService.aidl"
+            echo "ERROR: INavigationService.aidl not found"
+            find app/src/main/aidl -type f -print
             exit 1
           fi
 
-          echo "Found AIDL:"
+          echo "AIDL found:"
           echo "$AIDL"
 
-          AIDL_PACKAGE=$(grep '^package ' "$AIDL" | sed 's/package //;s/;//' | tr -d '\r')
+          AIDL_PACKAGE=$(grep '^package ' "$AIDL" \
+            | head -1 \
+            | sed 's/^package //;s/;//' \
+            | tr -d '\r')
 
           if [ -z "$AIDL_PACKAGE" ]; then
-            echo "Could not determine AIDL package"
+            echo "ERROR: Could not determine AIDL package"
+            cat "$AIDL"
             exit 1
           fi
 
-          echo "AIDL package: $AIDL_PACKAGE"
+          echo "AIDL package is:"
+          echo "$AIDL_PACKAGE"
 
-          echo "Fixing INavigationService imports..."
+          FULL_IMPORT="import ${AIDL_PACKAGE}.INavigationService;"
 
-          find app/src/main/java -name "*.java" -type f -print0 | while IFS= read -r -d '' FILE
-          do
-            sed -i "s/^import INavigationService;$/import ${AIDL_PACKAGE}.INavigationService;/" "$FILE"
-          done
+          echo "Correct import will be:"
+          echo "$FULL_IMPORT"
 
-          echo "Checking NavigationUserService.java..."
-          sed -n '1,120p' app/src/main/java/com/simon/navigation_switcher/NavigationUserService.java
+          echo ""
+          echo "Fixing NavigationUserService.java..."
 
-      - name: Fix incompatible Shizuku overrides
-        working-directory: ${{ env.PROJECT_DIR }}
-        run: |
           SERVICE="app/src/main/java/com/simon/navigation_switcher/NavigationUserService.java"
 
-          if [ ! -f "$SERVICE" ]; then
-            echo "NavigationUserService.java not found"
-            exit 1
+          if [ -f "$SERVICE" ]; then
+
+            # Remove every existing malformed INavigationService import.
+            sed -i '/^[[:space:]]*import[[:space:]]\+INavigationService/d' "$SERVICE"
+
+            # Remove any existing correctly-qualified import to avoid duplicates.
+            sed -i "\|^[[:space:]]*import[[:space:]]\+${AIDL_PACKAGE//./\\.}\.INavigationService;|d" "$SERVICE"
+
+            # Add the correct import after the package declaration.
+            sed -i "/^package /a $FULL_IMPORT" "$SERVICE"
+
+            # Remove invalid override annotations.
+            sed -i 's/@Override[[:space:]]*//g' "$SERVICE"
+
           fi
 
-          sed -i 's/@Override[[:space:]]*//g' "$SERVICE"
+          echo ""
+          echo "Fixing NavigationController.java..."
 
-          echo "Shizuku override annotations fixed"
+          CONTROLLER="app/src/main/java/com/simon/navigation_switcher/NavigationController.java"
+
+          if [ -f "$CONTROLLER" ]; then
+
+            # Remove malformed imports.
+            sed -i '/^[[:space:]]*import[[:space:]]\+INavigationService/d' "$CONTROLLER"
+
+            # Remove duplicate correctly-qualified import.
+            sed -i "\|^[[:space:]]*import[[:space:]]\+${AIDL_PACKAGE//./\\.}\.INavigationService;|d" "$CONTROLLER"
+
+            # Add correct import.
+            sed -i "/^package /a $FULL_IMPORT" "$CONTROLLER"
+
+          fi
+
+          echo ""
+          echo "===== NavigationUserService.java ====="
+
+          if [ -f "$SERVICE" ]; then
+            cat "$SERVICE"
+          fi
+
+          echo ""
+          echo "===== NavigationController.java ====="
+
+          if [ -f "$CONTROLLER" ]; then
+            cat "$CONTROLLER"
+          fi
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
