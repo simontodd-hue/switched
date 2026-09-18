@@ -95,7 +95,52 @@ jobs:
 
           echo "Java and Kotlin JVM targets set to 17"
 
-      - name: Fix Shizuku UserService overrides
+      - name: Fix Shizuku service source
+        working-directory: ${{ env.PROJECT_DIR }}
+        run: |
+          SERVICE_DIR="app/src/main/java/com/simon/navigation_switcher"
+
+          echo "Checking Java source files..."
+
+          if [ -d "$SERVICE_DIR" ]; then
+            echo "Found source directory:"
+            echo "$SERVICE_DIR"
+          else
+            echo "Source directory not found:"
+            echo "$SERVICE_DIR"
+            exit 1
+          fi
+
+          AIDL=$(find app/src/main/aidl -name "INavigationService.aidl" -type f -print -quit)
+
+          if [ -z "$AIDL" ]; then
+            echo "Could not find INavigationService.aidl"
+            exit 1
+          fi
+
+          echo "Found AIDL:"
+          echo "$AIDL"
+
+          AIDL_PACKAGE=$(grep '^package ' "$AIDL" | sed 's/package //;s/;//' | tr -d '\r')
+
+          if [ -z "$AIDL_PACKAGE" ]; then
+            echo "Could not determine AIDL package"
+            exit 1
+          fi
+
+          echo "AIDL package: $AIDL_PACKAGE"
+
+          echo "Fixing INavigationService imports..."
+
+          find app/src/main/java -name "*.java" -type f -print0 | while IFS= read -r -d '' FILE
+          do
+            sed -i "s/^import INavigationService;$/import ${AIDL_PACKAGE}.INavigationService;/" "$FILE"
+          done
+
+          echo "Checking NavigationUserService.java..."
+          sed -n '1,120p' app/src/main/java/com/simon/navigation_switcher/NavigationUserService.java
+
+      - name: Fix incompatible Shizuku overrides
         working-directory: ${{ env.PROJECT_DIR }}
         run: |
           SERVICE="app/src/main/java/com/simon/navigation_switcher/NavigationUserService.java"
@@ -105,12 +150,9 @@ jobs:
             exit 1
           fi
 
-          echo "Removing incompatible @Override annotations..."
-
           sed -i 's/@Override[[:space:]]*//g' "$SERVICE"
 
-          echo "Updated NavigationUserService.java:"
-          cat "$SERVICE"
+          echo "Shizuku override annotations fixed"
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
